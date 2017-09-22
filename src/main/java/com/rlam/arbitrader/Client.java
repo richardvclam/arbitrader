@@ -10,12 +10,16 @@ import com.neovisionaries.ws.client.*;
 
 public class Client {
 
-	public static double BTCUSD, ETHUSD, ETHBTC, LTCUSD, LTCBTC;
-	public static int markets = 4;
+	public static Market BTCUSD = Market.BTCUSD;
+	public static Market ETHUSD = Market.ETHUSD;
+	public static Market ETHBTC = Market.ETHBTC;
+	public static Market LTCUSD = Market.LTCUSD;
+	public static Market LTCBTC = Market.LTCBTC;
+	
 	public static double[][] marketRates = {{1, 0, 0, 0},
-											{0, 1, 0, 0},
-											{0, 0, 1, 0},
-											{0, 0, 0, 1}};
+										   {0, 1, 0, 0},
+										   {0, 0, 1, 0},
+										   {0, 0, 0, 1}};
 	public static String[] currencies = {"USD", "BTC", "ETH", "LTC"};
 	
 	/**
@@ -35,17 +39,27 @@ public class Client {
      * The entry point of this command line application.
      */
     public static void main(String[] args) throws Exception {
-    	HttpResponse<JsonNode> response =  Unirest.get("https://api.gdax.com/products/LTC-BTC/ticker").asJson();
-    	JsonObject jsonObject = (JsonObject) new JsonParser().parse(response.getBody().toString());
-    	System.out.println(jsonObject.get("price").getAsDouble());
-
-    	//String subscribe = "{\"type\": \"subscribe\",\"product_ids\": [\"BTC-USD\",\"ETH-USD\",\"ETH-BTC\",\"LTC-USD\",\"LTC-BTC\"],\"channels\": [\"ticker\"]}";
-    	Gson gson = new Gson();
-    	String subscribe = gson.toJson(new Subscribe());
+    		initializeMarketRates();
+	    	//String subscribe = "{\"type\": \"subscribe\",\"product_ids\": [\"BTC-USD\",\"ETH-USD\",\"ETH-BTC\",\"LTC-USD\",\"LTC-BTC\"],\"channels\": [\"ticker\"]}";
+	    	Gson gson = new Gson();
+	    	String subscribe = gson.toJson(new Subscribe());
         // Connect to the GDAX server.
         WebSocket ws = connect();
         // Send initial subscribe message to receive feed messages
         ws.sendText(subscribe);
+    }
+    
+    private static void initializeMarketRates() {
+    		// Fetch only the markets with the lowest volume to initially populate the market rates matrix.
+    		// Limit to 3 due to the REST API's request per second limitation.
+    		ETHBTC.fetchPriceFromServer();
+    		updateMarketRates(ETHBTC);
+    		
+    		LTCUSD.fetchPriceFromServer();
+    		updateMarketRates(LTCUSD);
+    		
+    		LTCBTC.fetchPriceFromServer();
+    		updateMarketRates(LTCBTC);
     }
 
 
@@ -63,36 +77,31 @@ public class Client {
                     String market = jsonObject.get("product_id").getAsString();
                     Double price = jsonObject.get("price").getAsDouble();
                     System.out.println(market + " " + price);
-                    switch(market) {
+                    switch (market) {
 	                    case "BTC-USD":
-	                    	BTCUSD = price;
-	                    	marketRates[1][0] = price;
-	                    	marketRates[0][1] = 1/price;
+	                    	BTCUSD.updatePrice(price);
+	                    	updateMarketRates(BTCUSD);
 	                    	break;
 	                    case "ETH-USD":
-	                    	ETHUSD = price;
-	                    	marketRates[2][0] = price;
-	                    	marketRates[0][2] = 1/price;
+	                    	ETHUSD.updatePrice(price);
+	                    	updateMarketRates(ETHUSD);
 	                    	break;
 	                    case "ETH-BTC":
-	                    	ETHBTC = price;
-	                    	marketRates[2][1] = price;
-	                    	marketRates[1][2] = 1/price;
+	                    	ETHBTC.updatePrice(price);
+	                    	updateMarketRates(ETHBTC);
 	                    	break;
 	                    case "LTC-USD":
-	                    	LTCUSD = price;
-	                    	marketRates[3][0] = price;
-	                    	marketRates[0][3] = 1/price;
+	                    	LTCUSD.updatePrice(price);
+	                    	updateMarketRates(LTCUSD);
 	                    	break;
 	                    case "LTC-BTC":
-	                    	LTCBTC = price;
-	                    	marketRates[3][1] = price;
-	                    	marketRates[1][3] = 1/price;
+	                    	LTCBTC.updatePrice(price);
+	                    	updateMarketRates(LTCBTC);
 	                    	break;
                     }
                     
                     // V currencies
-                    int V = markets;
+                    int V = currencies.length;
 
                     // create complete network
                     EdgeWeightedDigraph G = new EdgeWeightedDigraph(V);
@@ -111,15 +120,15 @@ public class Client {
                         double stake = intialStake + total;
                         double beginningStake = stake;
                         for (DirectedEdge e : spt.negativeCycle()) {
-                            System.out.printf("%10.5f %s ", stake, currencies[e.from()]);
-                            stake *= Math.exp(-e.weight());
-                            System.out.printf("= %10.5f %s\n", stake, currencies[e.to()]);
+                        	   Market marketObj = getMarket(currencies[e.from()], currencies[e.to()]);
+                        	   System.out.printf("%10.5f %s ", stake, currencies[e.from()]);
+                        	   stake *= Math.exp(-e.weight());
+                        	   System.out.printf("= %10.5f %s @ %10.5f %s \n", stake, currencies[e.to()], marketObj.getPrice(), marketObj.getMarket());
                         }
                         System.out.println("Profit: " + (stake - beginningStake));
                         total += (stake - beginningStake);
                         System.out.println("Total: " + total);
-                    }
-                    else {
+                    } else {
                         System.out.println("No arbitrage opportunity");
                     }
                 }
@@ -136,9 +145,20 @@ public class Client {
         return new BufferedReader(new InputStreamReader(System.in));
     }
     
-    private static void updateMatrix(Market market) {
-    	marketRates[market.getRow()][market.getColumn()] = market.getPrice();
-    	marketRates[market.getColumn()][market.getRow()] = 1 / market.getPrice();
+    private static void updateMarketRates(Market market) {
+	    	marketRates[market.getRow()][market.getColumn()] = market.getPrice();
+	    	marketRates[market.getColumn()][market.getRow()] = 1 / market.getPrice();
+    }
+    
+    private static Market getMarket(String from, String to) {
+    		for (Market m : Market.values()) {
+    			String market = m.getMarket();
+    			
+    			if (market.equals(from + "-" + to) || market.equals(to + "-" + from)) {
+    				return m;
+    			}
+    		}
+    		return null;
     }
 	
 }
