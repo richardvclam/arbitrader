@@ -5,6 +5,7 @@ import java.io.*;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.mashape.unirest.http.*;
 import com.neovisionaries.ws.client.*;
 
 public class Client {
@@ -34,6 +35,10 @@ public class Client {
      * The entry point of this command line application.
      */
     public static void main(String[] args) throws Exception {
+    	HttpResponse<JsonNode> response =  Unirest.get("https://api.gdax.com/products/LTC-BTC/ticker").asJson();
+    	JsonObject jsonObject = (JsonObject) new JsonParser().parse(response.getBody().toString());
+    	System.out.println(jsonObject.get("price").getAsDouble());
+
     	//String subscribe = "{\"type\": \"subscribe\",\"product_ids\": [\"BTC-USD\",\"ETH-USD\",\"ETH-BTC\",\"LTC-USD\",\"LTC-BTC\"],\"channels\": [\"ticker\"]}";
     	Gson gson = new Gson();
     	String subscribe = gson.toJson(new Subscribe());
@@ -129,6 +134,11 @@ public class Client {
      */
     private static BufferedReader getInput() throws IOException {
         return new BufferedReader(new InputStreamReader(System.in));
+    }
+    
+    private static void updateMatrix(Market market) {
+    	marketRates[market.getRow()][market.getColumn()] = market.getPrice();
+    	marketRates[market.getColumn()][market.getRow()] = 1 / market.getPrice();
     }
 	
 }
