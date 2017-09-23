@@ -1,14 +1,14 @@
 package com.rlam.arbitrader;
 
 import java.io.*;
+import java.util.*;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import com.mashape.unirest.http.*;
 import com.neovisionaries.ws.client.*;
 
-public class Client {
+public class MarketListener implements Runnable {
 
 	public static Market BTCUSD = Market.BTCUSD;
 	public static Market ETHUSD = Market.ETHUSD;
@@ -21,6 +21,9 @@ public class Client {
 										   {0, 0, 1, 0},
 										   {0, 0, 0, 1}};
 	public static String[] currencies = {"USD", "BTC", "ETH", "LTC"};
+
+	private Thread thread;
+	private static App app;
 	
 	/**
      * The GDAX server
@@ -31,18 +34,21 @@ public class Client {
      * The timeout value in milliseconds for socket connection.
      */
     private static final int TIMEOUT = 5000;
-    private static double intialStake = 1000;
+    private static double initialStake = 1000;
     private static double total = 0;
 
+    public MarketListener(App appl) {
+	    app = appl;
+    }
 
     /**
      * The entry point of this command line application.
      */
     public static void main(String[] args) throws Exception {
-    		initializeMarketRates();
-	    	//String subscribe = "{\"type\": \"subscribe\",\"product_ids\": [\"BTC-USD\",\"ETH-USD\",\"ETH-BTC\",\"LTC-USD\",\"LTC-BTC\"],\"channels\": [\"ticker\"]}";
-	    	Gson gson = new Gson();
-	    	String subscribe = gson.toJson(new Subscribe());
+        initializeMarketRates();
+	    //String subscribe = "{\"type\": \"subscribe\",\"product_ids\": [\"BTC-USD\",\"ETH-USD\",\"ETH-BTC\",\"LTC-USD\",\"LTC-BTC\"],\"channels\": [\"ticker\"]}";
+	    Gson gson = new Gson();
+	    String subscribe = gson.toJson(new Subscribe());
         // Connect to the GDAX server.
         WebSocket ws = connect();
         // Send initial subscribe message to receive feed messages
@@ -62,7 +68,6 @@ public class Client {
     		updateMarketRates(LTCBTC);
     }
 
-
     /**
      * Connect to the server.
      */
@@ -77,72 +82,44 @@ public class Client {
                     String market = jsonObject.get("product_id").getAsString();
                     Double price = jsonObject.get("price").getAsDouble();
                     System.out.println(market + " " + price);
+                    Market marketObj = null;
                     switch (market) {
 	                    case "BTC-USD":
 	                    	BTCUSD.updatePrice(price);
 	                    	updateMarketRates(BTCUSD);
+	                    	marketObj = BTCUSD;
 	                    	break;
 	                    case "ETH-USD":
 	                    	ETHUSD.updatePrice(price);
 	                    	updateMarketRates(ETHUSD);
-	                    	break;
+		                    marketObj = ETHUSD;
+		                    break;
 	                    case "ETH-BTC":
 	                    	ETHBTC.updatePrice(price);
 	                    	updateMarketRates(ETHBTC);
-	                    	break;
+		                    marketObj = ETHBTC;
+		                    break;
 	                    case "LTC-USD":
 	                    	LTCUSD.updatePrice(price);
 	                    	updateMarketRates(LTCUSD);
-	                    	break;
+		                    marketObj = LTCUSD;
+		                    break;
 	                    case "LTC-BTC":
 	                    	LTCBTC.updatePrice(price);
 	                    	updateMarketRates(LTCBTC);
-	                    	break;
-                    }
-                    
-                    // V currencies
-                    int V = currencies.length;
-
-                    // create complete network
-                    EdgeWeightedDigraph G = new EdgeWeightedDigraph(V);
-                    for (int v = 0; v < V; v++) {
-                        for (int w = 0; w < V; w++) {
-                            double rate = marketRates[v][w];
-                            DirectedEdge e = new DirectedEdge(v, w, -Math.log(rate));
-                            G.addEdge(e);
-                        }
+		                    marketObj = LTCBTC;
+		                    break;
                     }
 
-                    // find negative cycle
-                    BellmanFordSP spt = new BellmanFordSP(G, 0);
-                    
-                    if (spt.hasNegativeCycle()) {
-                        double stake = intialStake + total;
-                        double beginningStake = stake;
-                        for (DirectedEdge e : spt.negativeCycle()) {
-                        	   Market marketObj = getMarket(currencies[e.from()], currencies[e.to()]);
-                        	   System.out.printf("%10.5f %s ", stake, currencies[e.from()]);
-                        	   stake *= Math.exp(-e.weight());
-                        	   System.out.printf("= %10.5f %s @ %10.5f %s \n", stake, currencies[e.to()], marketObj.getPrice(), marketObj.getMarket());
-                        }
-                        System.out.println("Profit: " + (stake - beginningStake));
-                        total += (stake - beginningStake);
-                        System.out.println("Total: " + total);
-                    } else {
-                        System.out.println("No arbitrage opportunity");
+                    ArrayList<String[]> opportunity = arbitrage();
+                    if (opportunity.size() > 2) {
+                    	app.onArbitrageOpportunity(opportunity);
                     }
+                    app.onPriceChange(marketObj);
                 }
             })
             .addExtension(WebSocketExtension.PERMESSAGE_DEFLATE)
             .connect();
-    }
-
-
-    /**
-     * Wrap the standard input with BufferedReader.
-     */
-    private static BufferedReader getInput() throws IOException {
-        return new BufferedReader(new InputStreamReader(System.in));
     }
     
     private static void updateMarketRates(Market market) {
@@ -160,5 +137,70 @@ public class Client {
     		}
     		return null;
     }
-	
+
+    public static ArrayList<String[]> arbitrage() {
+	    // V currencies
+	    int V = currencies.length;
+
+	    // create complete network
+	    EdgeWeightedDigraph G = new EdgeWeightedDigraph(V);
+	    for (int v = 0; v < V; v++) {
+		    for (int w = 0; w < V; w++) {
+			    double rate = marketRates[v][w];
+			    DirectedEdge e = new DirectedEdge(v, w, -Math.log(rate));
+			    G.addEdge(e);
+		    }
+	    }
+
+	    // find negative cycle
+	    BellmanFordSP spt = new BellmanFordSP(G, 0);
+
+	    ArrayList<String[]> transactions = new ArrayList<String[]>();
+	    if (spt.hasNegativeCycle()) {
+		    double stake = initialStake + total;
+		    double beginningStake = stake;
+		    for (DirectedEdge e : spt.negativeCycle()) {
+		    	String[] transaction = { currencies[e.from()],  currencies[e.to()] };
+//			    Market marketObj = getMarket(currencies[e.from()], currencies[e.to()]);
+//			    System.out.printf("%10.5f %s ", stake, currencies[e.from()]);
+//			    stake *= Math.exp(-e.weight());
+//			    System.out.printf("= %10.5f %s @ %10.5f %s \n", stake, currencies[e.to()], marketObj.getPrice(), marketObj.getMarket());
+//			    count++;
+			    transactions.add(transaction);
+		    }
+//		    System.out.println("Profit: " + (stake - beginningStake));
+//		    total += (stake - beginningStake);
+//		    System.out.println("Total: " + total);
+
+		    // This is a precaution as the algorithm sometimes thinks there is an opportunity when there is only 2
+		    // currencies to trade. We need atleast 3 currencies for there to be a valid opportunity.
+//		    return count > 2;
+
+	    } else {
+		    System.out.println("No arbitrage opportunity");
+	    }
+	    return transactions;
+    }
+
+	@Override
+	public void run() {
+		initializeMarketRates();
+		Gson gson = new Gson();
+		String subscribe = gson.toJson(new Subscribe());
+		try {
+			// Connect to the GDAX server.
+			WebSocket ws = connect();
+			// Send initial subscribe message to receive feed messages
+			ws.sendText(subscribe);
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+
+	public void start() {
+    	if (thread == null) {
+    		thread = new Thread(this);
+    		thread.start();
+	    }
+	}
 }
