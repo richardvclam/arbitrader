@@ -1,6 +1,7 @@
 package com.rlam.arbitrader;
 
 import java.io.*;
+import java.math.BigDecimal;
 import java.util.*;
 
 import com.google.gson.Gson;
@@ -15,11 +16,13 @@ public class MarketListener implements Runnable {
 	public static Market ETHBTC = Market.ETHBTC;
 	public static Market LTCUSD = Market.LTCUSD;
 	public static Market LTCBTC = Market.LTCBTC;
+
+	public HashMap<String, Market> markets;
 	
-	public static double[][] marketRates = {{1, 0, 0, 0},
-										   {0, 1, 0, 0},
-										   {0, 0, 1, 0},
-										   {0, 0, 0, 1}};
+	public static BigDecimal[][] marketRates = {{BigDecimal.ONE, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO},
+										        {BigDecimal.ZERO, BigDecimal.ONE, BigDecimal.ZERO, BigDecimal.ZERO},
+										        {BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ONE, BigDecimal.ZERO},
+										        {BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ONE}};
 	public static String[] currencies = {"USD", "BTC", "ETH", "LTC"};
 
 	private Thread thread;
@@ -38,21 +41,11 @@ public class MarketListener implements Runnable {
     private static double total = 0;
 
     public MarketListener(App appl) {
-	    app = appl;
-    }
-
-    /**
-     * The entry point of this command line application.
-     */
-    public static void main(String[] args) throws Exception {
-        initializeMarketRates();
-	    //String subscribe = "{\"type\": \"subscribe\",\"product_ids\": [\"BTC-USD\",\"ETH-USD\",\"ETH-BTC\",\"LTC-USD\",\"LTC-BTC\"],\"channels\": [\"ticker\"]}";
-	    Gson gson = new Gson();
-	    String subscribe = gson.toJson(new Subscribe());
-        // Connect to the GDAX server.
-        WebSocket ws = connect();
-        // Send initial subscribe message to receive feed messages
-        ws.sendText(subscribe);
+    	app = appl;
+    	markets = new HashMap<>();
+    	for (Market m : Market.values()) {
+    		markets.put(m.getMarket(), m);
+	    }
     }
     
     private static void initializeMarketRates() {
@@ -71,7 +64,7 @@ public class MarketListener implements Runnable {
     /**
      * Connect to the server.
      */
-    private static WebSocket connect() throws IOException, WebSocketException {
+    private WebSocket connect() throws IOException, WebSocketException {
         return new WebSocketFactory()
             .setConnectionTimeout(TIMEOUT)
             .createSocket(SERVER)
@@ -79,43 +72,19 @@ public class MarketListener implements Runnable {
                 // A text message arrived from the server.
                 public void onTextMessage(WebSocket websocket, String message) {
                     JsonObject jsonObject = (JsonObject) new JsonParser().parse(message);
-                    String market = jsonObject.get("product_id").getAsString();
-                    Double price = jsonObject.get("price").getAsDouble();
-                    System.out.println(market + " " + price);
-                    Market marketObj = null;
-                    switch (market) {
-	                    case "BTC-USD":
-	                    	BTCUSD.updatePrice(price);
-	                    	updateMarketRates(BTCUSD);
-	                    	marketObj = BTCUSD;
-	                    	break;
-	                    case "ETH-USD":
-	                    	ETHUSD.updatePrice(price);
-	                    	updateMarketRates(ETHUSD);
-		                    marketObj = ETHUSD;
-		                    break;
-	                    case "ETH-BTC":
-	                    	ETHBTC.updatePrice(price);
-	                    	updateMarketRates(ETHBTC);
-		                    marketObj = ETHBTC;
-		                    break;
-	                    case "LTC-USD":
-	                    	LTCUSD.updatePrice(price);
-	                    	updateMarketRates(LTCUSD);
-		                    marketObj = LTCUSD;
-		                    break;
-	                    case "LTC-BTC":
-	                    	LTCBTC.updatePrice(price);
-	                    	updateMarketRates(LTCBTC);
-		                    marketObj = LTCBTC;
-		                    break;
-                    }
+                    String marketID = jsonObject.get("product_id").getAsString();
+                    BigDecimal price = jsonObject.get("price").getAsBigDecimal();
+                    System.out.println(marketID + " " + price);
+
+	                Market market = markets.get(marketID);
+	                market.updatePrice(price);
+	                updateMarketRates(market);
 
                     ArrayList<String[]> opportunity = arbitrage();
                     if (opportunity.size() > 2) {
                     	app.onArbitrageOpportunity(opportunity);
                     }
-                    app.onPriceChange(marketObj);
+                    app.onPriceChange(market);
                 }
             })
             .addExtension(WebSocketExtension.PERMESSAGE_DEFLATE)
@@ -124,7 +93,7 @@ public class MarketListener implements Runnable {
     
     private static void updateMarketRates(Market market) {
 	    	marketRates[market.getRow()][market.getColumn()] = market.getPrice();
-	    	marketRates[market.getColumn()][market.getRow()] = 1 / market.getPrice();
+	    	marketRates[market.getColumn()][market.getRow()] = market.getInversePrice();
     }
     
     private static Market getMarket(String from, String to) {
@@ -146,7 +115,7 @@ public class MarketListener implements Runnable {
 	    EdgeWeightedDigraph G = new EdgeWeightedDigraph(V);
 	    for (int v = 0; v < V; v++) {
 		    for (int w = 0; w < V; w++) {
-			    double rate = marketRates[v][w];
+			    double rate = marketRates[v][w].doubleValue();
 			    DirectedEdge e = new DirectedEdge(v, w, -Math.log(rate));
 			    G.addEdge(e);
 		    }
@@ -155,16 +124,16 @@ public class MarketListener implements Runnable {
 	    // find negative cycle
 	    BellmanFordSP spt = new BellmanFordSP(G, 0);
 
-	    ArrayList<String[]> transactions = new ArrayList<String[]>();
+	    ArrayList<String[]> transactions = new ArrayList<>();
 	    if (spt.hasNegativeCycle()) {
 		    double stake = initialStake + total;
 		    double beginningStake = stake;
 		    for (DirectedEdge e : spt.negativeCycle()) {
 		    	String[] transaction = { currencies[e.from()],  currencies[e.to()] };
-//			    Market marketObj = getMarket(currencies[e.from()], currencies[e.to()]);
-//			    System.out.printf("%10.5f %s ", stake, currencies[e.from()]);
-//			    stake *= Math.exp(-e.weight());
-//			    System.out.printf("= %10.5f %s @ %10.5f %s \n", stake, currencies[e.to()], marketObj.getPrice(), marketObj.getMarket());
+			    Market marketObj = getMarket(currencies[e.from()], currencies[e.to()]);
+			    System.out.printf("%10.5f %s ", stake, currencies[e.from()]);
+			    stake *= Math.exp(-e.weight());
+			    System.out.printf("= %10.5f %s @ %10.5f %s \n", stake, currencies[e.to()], marketObj.getPrice(), marketObj.getMarket());
 //			    count++;
 			    transactions.add(transaction);
 		    }
@@ -176,9 +145,16 @@ public class MarketListener implements Runnable {
 		    // currencies to trade. We need atleast 3 currencies for there to be a valid opportunity.
 //		    return count > 2;
 
+
 	    } else {
 		    System.out.println("No arbitrage opportunity");
 	    }
+//	    for (int i = 0; i < marketRates.length; i++) {
+//	    	for (int j = 0; j < marketRates[0].length; j++) {
+//	    		System.out.print(marketRates[i][j].toString() + " ");
+//		    }
+//		    System.out.println();
+//	    }
 	    return transactions;
     }
 
