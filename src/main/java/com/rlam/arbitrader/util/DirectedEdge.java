@@ -1,4 +1,4 @@
-package com.rlam.arbitrader;
+package com.rlam.arbitrader.util;
 /*************************************************************************
  *  Compilation:  javac DirectedEdge.java
  *  Execution:    java DirectedEdge

@@ -8,25 +8,23 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.neovisionaries.ws.client.*;
+import com.rlam.arbitrader.util.BellmanFordSP;
+import com.rlam.arbitrader.util.DirectedEdge;
+import com.rlam.arbitrader.util.EdgeWeightedDigraph;
 
+// TODO make singleton
 public class MarketListener implements Runnable {
 
-	public static Market BTCUSD = Market.BTCUSD;
-	public static Market ETHUSD = Market.ETHUSD;
-	public static Market ETHBTC = Market.ETHBTC;
-	public static Market LTCUSD = Market.LTCUSD;
-	public static Market LTCBTC = Market.LTCBTC;
+	public static String[] currencies = {"USD", "BTC", "ETH", "LTC"};
 
 	public HashMap<String, Market> markets;
 	
-	public static BigDecimal[][] marketRates = {{BigDecimal.ONE, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO},
-										        {BigDecimal.ZERO, BigDecimal.ONE, BigDecimal.ZERO, BigDecimal.ZERO},
-										        {BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ONE, BigDecimal.ZERO},
-										        {BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ONE}};
-	public static String[] currencies = {"USD", "BTC", "ETH", "LTC"};
-
+	public BigDecimal[][] marketRates = {{BigDecimal.ONE, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO},
+								         {BigDecimal.ZERO, BigDecimal.ONE, BigDecimal.ZERO, BigDecimal.ZERO},
+								         {BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ONE, BigDecimal.ZERO},
+								         {BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ONE}};
 	private Thread thread;
-	private static App app;
+	private App app;
 	
 	/**
      * The GDAX server
@@ -40,25 +38,24 @@ public class MarketListener implements Runnable {
     private static double initialStake = 1000;
     private static double total = 0;
 
-    public MarketListener(App appl) {
-    	app = appl;
+    public MarketListener(App app) {
+    	this.app = app;
     	markets = new HashMap<>();
     	for (Market m : Market.values()) {
     		markets.put(m.getMarket(), m);
 	    }
     }
     
-    private static void initializeMarketRates() {
-    		// Fetch only the markets with the lowest volume to initially populate the market rates matrix.
-    		// Limit to 3 due to the REST API's request per second limitation.
-    		ETHBTC.fetchPriceFromServer();
-    		updateMarketRates(ETHBTC);
-    		
-    		LTCUSD.fetchPriceFromServer();
-    		updateMarketRates(LTCUSD);
-    		
-    		LTCBTC.fetchPriceFromServer();
-    		updateMarketRates(LTCBTC);
+    private void initializeMarketRates() {
+        // Fetch only the markets with the lowest volume to initially populate the market rates matrix.
+        // Limit to 3 due to the REST API's request per second limitation.
+	    String[] marketsToFetch = {"ETH-BTC", "LTC-USD", "LTC-BTC"};
+
+	    for (String marketID : marketsToFetch) {
+		    Market market = markets.get(marketID);
+		    market.fetchPriceFromServer();
+		    updateMarketRates(market);
+	    }
     }
 
     /**
@@ -74,11 +71,12 @@ public class MarketListener implements Runnable {
                     JsonObject jsonObject = (JsonObject) new JsonParser().parse(message);
                     String marketID = jsonObject.get("product_id").getAsString();
                     BigDecimal price = jsonObject.get("price").getAsBigDecimal();
-                    System.out.println(marketID + " " + price);
 
 	                Market market = markets.get(marketID);
-	                market.updatePrice(price);
-	                updateMarketRates(market);
+	                if (market.updatePrice(price)) {
+		                updateMarketRates(market);
+		                System.out.println(marketID + " " + price);
+	                }
 
                     ArrayList<String[]> opportunity = arbitrage();
                     if (opportunity.size() > 2) {
@@ -91,12 +89,12 @@ public class MarketListener implements Runnable {
             .connect();
     }
     
-    private static void updateMarketRates(Market market) {
+    private void updateMarketRates(Market market) {
 	    	marketRates[market.getRow()][market.getColumn()] = market.getPrice();
 	    	marketRates[market.getColumn()][market.getRow()] = market.getInversePrice();
     }
     
-    private static Market getMarket(String from, String to) {
+    private Market getMarket(String from, String to) {
     		for (Market m : Market.values()) {
     			String market = m.getMarket();
     			
@@ -107,7 +105,7 @@ public class MarketListener implements Runnable {
     		return null;
     }
 
-    public static ArrayList<String[]> arbitrage() {
+    public ArrayList<String[]> arbitrage() {
 	    // V currencies
 	    int V = currencies.length;
 
@@ -128,6 +126,7 @@ public class MarketListener implements Runnable {
 	    if (spt.hasNegativeCycle()) {
 		    double stake = initialStake + total;
 		    double beginningStake = stake;
+		    System.out.println("=========================================");
 		    for (DirectedEdge e : spt.negativeCycle()) {
 		    	String[] transaction = { currencies[e.from()],  currencies[e.to()] };
 			    Market marketObj = getMarket(currencies[e.from()], currencies[e.to()]);
@@ -137,6 +136,7 @@ public class MarketListener implements Runnable {
 //			    count++;
 			    transactions.add(transaction);
 		    }
+		    System.out.println("=========================================");
 //		    System.out.println("Profit: " + (stake - beginningStake));
 //		    total += (stake - beginningStake);
 //		    System.out.println("Total: " + total);

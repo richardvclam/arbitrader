@@ -20,6 +20,7 @@ public class App {
 	private String orderID;
 	private boolean inTransaction;
 	private String currentMarket;
+	private MarketListener listener;
 
 	public App() {
 		inTransaction = false;
@@ -27,6 +28,9 @@ public class App {
 		orderSize = BigDecimal.ZERO;
 		orderID = "";
 		currentMarket = "";
+
+		listener = new MarketListener(this);
+		listener.start();
 	}
 
 	public void onArbitrageOpportunity(ArrayList<String[]> opportunity) {
@@ -57,11 +61,13 @@ public class App {
 				// Market price is increasing from our order price
 				cancelOrder();
 			}
-			BigDecimal tmpBalance = balance;
-			for (int i = 0; i < opportunity.size(); i++) {
-				tmpBalance = tmpBalance.multiply(marketObj.getPrice(opportunity.get(i)[0], opportunity.get(i)[1]));
+			if (opportunity.size() > 0 && opportunity.size() < 3) {
+				BigDecimal tmpBalance = balance;
+				for (int i = 0; i < opportunity.size(); i++) {
+					tmpBalance = tmpBalance.multiply(marketObj.getPrice(opportunity.get(i)[0], opportunity.get(i)[1]));
+				}
+				System.out.println("If we sell at current prices, we'll profit " + tmpBalance.toString());
 			}
-			System.out.println("If we sell at current prices, we'll profit " + tmpBalance.toString());
 		}
 	}
 
@@ -72,7 +78,7 @@ public class App {
 			orderPrice = marketObj.getPrice().subtract(marketObj.getIncrement());
 			orderSize = balance.multiply(marketObj.getPrice(opportunity.get(0)[0], opportunity.get(0)[1]));
 			currentMarket = marketObj.getMarket();
-			System.out.println("Placed an order of " + orderSize.toString() + " " + opportunity.get(0)[1] + " for " + orderPrice.toString() + " " +  marketObj.getMarket());
+			System.out.println("Placed an order of " + orderSize.toString() + " " + opportunity.get(0)[1] + " @ " + orderPrice.toString() + " " +  marketObj.getMarket());
 			inTransaction = true;
 		}
 	}
@@ -118,8 +124,7 @@ public class App {
     	// MarketListener runs on its own thread.
 	    // MarketListener is constantly listening for price changes in the market.
 	    // This application will use these prices to calculate arbitrage opportunities.
-    	MarketListener listener = new MarketListener(app);
-    	listener.start();
+
 
 	    // After obtaining an opportunity, set a limit buy order for first transaction
 

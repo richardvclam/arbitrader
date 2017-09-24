@@ -50,7 +50,7 @@ public enum Market {
 		return price;
 	}
 
-	public BigDecimal getInversePrice() { return BigDecimal.ONE.divide(price,7, BigDecimal.ROUND_HALF_UP); }
+	public BigDecimal getInversePrice() { return BigDecimal.ONE.divide(price,18, BigDecimal.ROUND_HALF_UP); }
 
 	public BigDecimal getPrice(String from, String to) {
 		String market = from + "-" + to;
@@ -64,8 +64,17 @@ public enum Market {
 		}
 	}
 
-	public void updatePrice(BigDecimal price) {
-		this.price = price;
+	/**
+	 * Update the price of this market. Returns TRUE if the price has changed and FALSE otherwise.
+	 * @param price the current price of the market
+	 * @return TRUE if market price has changed, FALSE if market price has not changed
+	 */
+	public boolean updatePrice(BigDecimal price) {
+		if (this.price.compareTo(price) != 0) {
+			this.price = price;
+			return true;
+		}
+		return false;
 	}
 	
 	public void fetchPriceFromServer() {

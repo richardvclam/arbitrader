@@ -1,4 +1,4 @@
-package com.rlam.arbitrader;
+package com.rlam.arbitrader.util;
 /*************************************************************************
  *  Compilation:  javac Queue.java
  *  Execution:    java Queue < input.txt

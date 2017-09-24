@@ -1,4 +1,4 @@
-package com.rlam.arbitrader;
+package com.rlam.arbitrader.util;
 /*************************************************************************
  *  Compilation:  javac EdgeWeightedDirectedCycle.java
  *  Execution:    java EdgeWeightedDirectedCycle V E F
