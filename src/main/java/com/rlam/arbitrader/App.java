@@ -1,6 +1,5 @@
 package com.rlam.arbitrader;
 
-import java.math.BigDecimal;
 import java.util.ArrayList;
 
 public class App {
@@ -12,11 +11,11 @@ public class App {
 											{0, 1, 0, 0},
 											{0, 0, 1, 0},
 											{0, 0, 0, 1}};
-	private static BigDecimal initialStake = new BigDecimal("1000");
+	public double usdBalance = 1000;
 	private ArrayList<String[]> opportunity;
-	private BigDecimal balance = new BigDecimal("1000");
-	private BigDecimal orderPrice;
-	private BigDecimal orderSize;
+	public double balance = 1000;
+	private double orderPrice;
+	private double orderSize;
 	private String orderID;
 	private boolean inTransaction;
 	private String currentMarket;
@@ -24,8 +23,8 @@ public class App {
 
 	public App() {
 		inTransaction = false;
-		orderPrice = BigDecimal.ZERO;
-		orderSize = BigDecimal.ZERO;
+		orderPrice = 0;
+		orderSize = 0;
 		orderID = "";
 		currentMarket = "";
 
@@ -47,26 +46,33 @@ public class App {
 
 	public void onPriceChange(Market marketObj) {
 		if (marketObj.getMarket().equals(currentMarket)) {
-			if (orderPrice.compareTo(marketObj.getPrice()) >= 0) {
+			if (orderPrice >= marketObj.getPrice()) {
 				fillOrder();
 				if (opportunity.size() > 0) {
 					placeOrder();
 				} else {
 					// We should have completed our transaction in this case.
 					inTransaction = false;
+					usdBalance = balance;
+					System.out.println("Completed opportunity! Balance: " + balance);
 				}
 
-			} else if (marketObj.getPrice().subtract(orderPrice).compareTo(marketObj.getIncrement()) > 0) {
-				System.out.println("Price diff is " + marketObj.getPrice().subtract(orderPrice));
+			} else if (marketObj.subtractPrice(orderPrice) > marketObj.getIncrement()) {
+				System.out.println("Price diff is " + marketObj.subtractPrice(orderPrice) + " " + marketObj.getMarket());
 				// Market price is increasing from our order price
-				cancelOrder();
-			}
-			if (opportunity.size() > 0 && opportunity.size() < 3) {
-				BigDecimal tmpBalance = balance;
-				for (int i = 0; i < opportunity.size(); i++) {
-					tmpBalance = tmpBalance.multiply(marketObj.getPrice(opportunity.get(i)[0], opportunity.get(i)[1]));
+				if (opportunity.size() > 0 && opportunity.size() < 3) {
+					double tmpBalance = balance;
+					for (int i = 0; i < opportunity.size(); i++) {
+						tmpBalance = tmpBalance * getMarket(opportunity.get(i)[0], opportunity.get(i)[1]).getPrice(opportunity.get(i)[0], opportunity.get(i)[1]);
+					}
+					System.out.println("If we sell at current prices, we'll profit " + tmpBalance);
+					if (tmpBalance > balance) {
+						cancelOrder();
+						placeOrder();
+					}
+				} else {
+					cancelOrder();
 				}
-				System.out.println("If we sell at current prices, we'll profit " + tmpBalance.toString());
 			}
 		}
 	}
@@ -75,10 +81,10 @@ public class App {
 		if (opportunity.size() > 0) {
 			// Set a limit buy order for transaction
 			Market marketObj = getMarket(opportunity.get(0)[0], opportunity.get(0)[1]);
-			orderPrice = marketObj.getPrice().subtract(marketObj.getIncrement());
-			orderSize = balance.multiply(marketObj.getPrice(opportunity.get(0)[0], opportunity.get(0)[1]));
+			orderPrice = marketObj.subtractPrice(marketObj.getIncrement());
+			orderSize = balance * marketObj.getPrice(opportunity.get(0)[0], opportunity.get(0)[1]);
 			currentMarket = marketObj.getMarket();
-			System.out.println("Placed an order of " + orderSize.toString() + " " + opportunity.get(0)[1] + " @ " + orderPrice.toString() + " " +  marketObj.getMarket());
+			System.out.println("Placed an order of " + orderSize + " " + opportunity.get(0)[1] + " @ " + orderPrice + " " +  marketObj.getMarket());
 			inTransaction = true;
 		}
 	}
@@ -87,8 +93,8 @@ public class App {
 		System.out.println("Order filled!");
 		balance = orderSize;
 		orderID = "";
-		orderSize = BigDecimal.ZERO;
-		orderPrice = BigDecimal.ZERO;
+		orderSize = 0;
+		orderPrice = 0;
 		currentMarket = "";
 		opportunity.remove(0);
 	}
@@ -97,9 +103,9 @@ public class App {
 		if (opportunity.size() == 3) {
 			currentMarket = "";
 			inTransaction = false;
-			orderPrice = BigDecimal.ZERO;
+			orderPrice = 0;
 			orderID = "";
-			orderSize = BigDecimal.ZERO;
+			orderSize = 0;
 			System.out.println("Cancelled order.");
 		} else {
 			System.out.println("Can't cancel order. We're already committed into this opportunity.");

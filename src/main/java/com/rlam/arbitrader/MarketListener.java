@@ -2,6 +2,8 @@ package com.rlam.arbitrader;
 
 import java.io.*;
 import java.math.BigDecimal;
+import java.math.MathContext;
+import java.math.RoundingMode;
 import java.util.*;
 
 import com.google.gson.Gson;
@@ -19,10 +21,14 @@ public class MarketListener implements Runnable {
 
 	public HashMap<String, Market> markets;
 	
-	public BigDecimal[][] marketRates = {{BigDecimal.ONE, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO},
-								         {BigDecimal.ZERO, BigDecimal.ONE, BigDecimal.ZERO, BigDecimal.ZERO},
-								         {BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ONE, BigDecimal.ZERO},
-								         {BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ONE}};
+//	public BigDecimal[][] marketRates = {{BigDecimal.ONE, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO},
+//								         {BigDecimal.ZERO, BigDecimal.ONE, BigDecimal.ZERO, BigDecimal.ZERO},
+//								         {BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ONE, BigDecimal.ZERO},
+//								         {BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ONE}};
+	public double[][] marketRates = {{1, 0, 0, 0},
+									 {0, 1, 0, 0},
+									 {0, 0, 1, 0},
+									 {0, 0, 0, 1}};
 	private Thread thread;
 	private App app;
 	
@@ -49,7 +55,7 @@ public class MarketListener implements Runnable {
     private void initializeMarketRates() {
         // Fetch only the markets with the lowest volume to initially populate the market rates matrix.
         // Limit to 3 due to the REST API's request per second limitation.
-	    String[] marketsToFetch = {"ETH-BTC", "LTC-USD", "LTC-BTC"};
+	    String[] marketsToFetch = {"ETH-BTC", "LTC-USD"};
 
 	    for (String marketID : marketsToFetch) {
 		    Market market = markets.get(marketID);
@@ -70,13 +76,12 @@ public class MarketListener implements Runnable {
                 public void onTextMessage(WebSocket websocket, String message) {
                     JsonObject jsonObject = (JsonObject) new JsonParser().parse(message);
                     String marketID = jsonObject.get("product_id").getAsString();
-                    BigDecimal price = jsonObject.get("price").getAsBigDecimal();
+                    double price = jsonObject.get("price").getAsDouble();
+	                System.out.println(marketID + " " + price);
 
 	                Market market = markets.get(marketID);
-	                if (market.updatePrice(price)) {
-		                updateMarketRates(market);
-		                System.out.println(marketID + " " + price);
-	                }
+	                market.updatePrice(price);
+	                updateMarketRates(market);
 
                     ArrayList<String[]> opportunity = arbitrage();
                     if (opportunity.size() > 2) {
@@ -113,7 +118,7 @@ public class MarketListener implements Runnable {
 	    EdgeWeightedDigraph G = new EdgeWeightedDigraph(V);
 	    for (int v = 0; v < V; v++) {
 		    for (int w = 0; w < V; w++) {
-			    double rate = marketRates[v][w].doubleValue();
+			    double rate = marketRates[v][w];
 			    DirectedEdge e = new DirectedEdge(v, w, -Math.log(rate));
 			    G.addEdge(e);
 		    }
@@ -124,11 +129,11 @@ public class MarketListener implements Runnable {
 
 	    ArrayList<String[]> transactions = new ArrayList<>();
 	    if (spt.hasNegativeCycle()) {
-		    double stake = initialStake + total;
+		    double stake = app.usdBalance + total;
 		    double beginningStake = stake;
 		    System.out.println("=========================================");
 		    for (DirectedEdge e : spt.negativeCycle()) {
-		    	String[] transaction = { currencies[e.from()],  currencies[e.to()] };
+		        String[] transaction = { currencies[e.from()],  currencies[e.to()] };
 			    Market marketObj = getMarket(currencies[e.from()], currencies[e.to()]);
 			    System.out.printf("%10.5f %s ", stake, currencies[e.from()]);
 			    stake *= Math.exp(-e.weight());
