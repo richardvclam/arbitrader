@@ -69,5 +69,20 @@
   		<artifactId>json</artifactId>
   		<version>20140107</version>
 	</dependency>
+	  <dependency>
+		  <groupId>org.knowm.xchange</groupId>
+		  <artifactId>xchange-core</artifactId>
+		  <version>4.2.2</version>
+	  </dependency>
+	  <dependency>
+		  <groupId>org.knowm.xchange</groupId>
+		  <artifactId>xchange-examples</artifactId>
+		  <version>4.2.2</version>
+	  </dependency>
+	  <dependency>
+		  <groupId>org.knowm.xchange</groupId>
+		  <artifactId>xchange-gdax</artifactId>
+		  <version>4.2.2</version>
+	  </dependency>
   </dependencies>
 </project>

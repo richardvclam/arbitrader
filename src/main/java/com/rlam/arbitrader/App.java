@@ -1,63 +1,79 @@
 package com.rlam.arbitrader;
 
+import org.knowm.xchange.currency.Currency;
+import org.knowm.xchange.dto.Order.OrderType;
+
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 
 public class App {
 
-	public static final boolean test = true;
+	public double usdLimit = 0;
 
 	public static String[] currencies = {"USD", "BTC", "ETH", "LTC"};
 	public static double[][] marketRates = {{1, 0, 0, 0},
 											{0, 1, 0, 0},
 											{0, 0, 1, 0},
 											{0, 0, 0, 1}};
-	public double usdBalance = 1000;
+//	public double usdBalance = 5000;
+	public double usdBalance;
 	private ArrayList<String[]> opportunity;
-	public double balance = 1000;
+//	public double balance = 5000;
+	public double balance;
 	private double orderPrice;
 	private double orderSize;
-	private String orderID;
-	private boolean inTransaction;
+	public String orderID;
+	public String clientOrderID;
+	public int orderIncrement;
+	public boolean inTransaction;
+	private boolean sellBack;
 	private String currentMarket;
 	private MarketListener listener;
+	private Account account;
+
+	private Map<String, Currency> currencyMap;
 
 	public App() {
+		account = new Account(Constants.API_KEY, Constants.SECRET, Constants.PASSPHRASE);
+		usdBalance = account.getAvailableBalance(Currency.USD);
+		balance = usdBalance;
 		inTransaction = false;
 		orderPrice = 0;
 		orderSize = 0;
 		orderID = "";
+		clientOrderID = "";
+		orderIncrement = 0;
 		currentMarket = "";
+		sellBack = false;
 
 		listener = new MarketListener(this);
 		listener.start();
+
+		currencyMap = new HashMap<>();
+
+		initCurrencyMap();
+	}
+
+	public void initCurrencyMap() {
+		currencyMap.put("USD", Currency.USD);
+		currencyMap.put("BTC", Currency.BTC);
+		currencyMap.put("ETH", Currency.ETH);
+		currencyMap.put("LTC", Currency.LTC);
 	}
 
 	public void onArbitrageOpportunity(ArrayList<String[]> opportunity) {
 		if (!inTransaction) {
-			System.out.println("There is an opportunity!");
 			this.opportunity = opportunity;
+			System.out.println("There is an opportunity!");
 
-			placeOrder();
-			if (!test) {
-				// TODO write the real HTTP POST requests
-			}
+			placeNextOrder();
 		}
 	}
 
 	public void onPriceChange(Market marketObj) {
 		if (marketObj.getMarket().equals(currentMarket)) {
-			if (orderPrice >= marketObj.getPrice()) {
-				fillOrder();
-				if (opportunity.size() > 0) {
-					placeOrder();
-				} else {
-					// We should have completed our transaction in this case.
-					inTransaction = false;
-					usdBalance = balance;
-					System.out.println("Completed opportunity! Balance: " + balance);
-				}
-
-			} else if (marketObj.subtractPrice(orderPrice) > marketObj.getIncrement()) {
+			if (marketObj.subtractPrice(orderPrice) > marketObj.getIncrement()) {
 				System.out.println("Price diff is " + marketObj.subtractPrice(orderPrice) + " " + marketObj.getMarket());
 				// Market price is increasing from our order price
 				if (opportunity.size() > 0 && opportunity.size() < 3) {
@@ -66,9 +82,19 @@ public class App {
 						tmpBalance = tmpBalance * getMarket(opportunity.get(i)[0], opportunity.get(i)[1]).getPrice(opportunity.get(i)[0], opportunity.get(i)[1]);
 					}
 					System.out.println("If we sell at current prices, we'll profit " + tmpBalance);
-					if (tmpBalance > balance) {
+					if (tmpBalance > usdBalance) {
 						cancelOrder();
-						placeOrder();
+						placeNextOrder();
+					} else {
+						// Try to sell back to USD
+						tmpBalance = balance * getMarket(opportunity.get(0)[0], "USD").getPrice();
+						if (tmpBalance > usdBalance) {
+							cancelOrder();
+							placeNextOrder(opportunity.get(0)[0], "USD");
+							System.out.println("Trying to sell back for " + tmpBalance + " USD.");
+						} else {
+							System.out.println("Can't sell back to USD because we'd lose money. Calculated balance: " + tmpBalance + " USD");
+						}
 					}
 				} else {
 					cancelOrder();
@@ -77,18 +103,172 @@ public class App {
 		}
 	}
 
+//	public void onPriceChange(Market marketObj) {
+//		if (marketObj.getMarket().equals(currentMarket)) {
+//			if (orderPrice >= marketObj.getPrice()) {
+//				fillOrder();
+//				if (opportunity.size() > 0) {
+//					placeOrder();
+//				} else {
+//					// We should have completed our transaction in this case.
+//					inTransaction = false;
+//					sellBack = false;
+//					usdBalance = balance;
+//					System.out.println("Completed opportunity! Balance: " + balance);
+//				}
+//
+//			} else if (marketObj.subtractPrice(orderPrice) > marketObj.getIncrement()) {
+//				System.out.println("Price diff is " + marketObj.subtractPrice(orderPrice) + " " + marketObj.getMarket());
+//				// Market price is increasing from our order price
+//				if (opportunity.size() > 0 && opportunity.size() < 3) {
+//					double tmpBalance = balance;
+//					for (int i = 0; i < opportunity.size(); i++) {
+//						tmpBalance = tmpBalance * getMarket(opportunity.get(i)[0], opportunity.get(i)[1]).getPrice(opportunity.get(i)[0], opportunity.get(i)[1]);
+//					}
+//					System.out.println("If we sell at current prices, we'll profit " + tmpBalance);
+//					if (tmpBalance > usdBalance) {
+//						cancelOrder();
+//						placeOrder();
+//					} else {
+//						// Try to sell back to USD
+//						tmpBalance = balance * getMarket(opportunity.get(0)[0], "USD").getPrice();
+//						if (tmpBalance > usdBalance) {
+//							cancelOrder();
+//							placeOrder(opportunity.get(0)[0], "USD");
+//							System.out.println("Trying to sell back for " + tmpBalance + " USD.");
+//						} else {
+//							System.out.println("Can't sell back to USD because we'd lose money. Calculated balance: " + tmpBalance + " USD");
+//						}
+//					}
+//				} else {
+//					cancelOrder();
+//				}
+//			}
+//		}
+//	}
+
+	@Deprecated
 	public void placeOrder() {
+		// Set a limit buy order for transaction
+		Market marketObj = getMarket(opportunity.get(0)[0], opportunity.get(0)[1]);
+		orderPrice = marketObj.subtractPrice(marketObj.getIncrement());
+		orderSize = balance * marketObj.getPrice(opportunity.get(0)[0], opportunity.get(0)[1]);
+		currentMarket = marketObj.getMarket();
+		System.out.println("Placed an order of " + orderSize + " " + opportunity.get(0)[1] + " @ " + orderPrice + " " +  marketObj.getMarket());
+		inTransaction = true;
+	}
+
+	@Deprecated
+	public void placeOrder(String from, String to) {
+		Market marketObj = getMarket(from, to);
+		orderPrice = marketObj.subtractPrice(marketObj.getIncrement());
+		orderSize = balance * marketObj.getPrice(from, to);
+		currentMarket = marketObj.getMarket();
+		System.out.println("Placed an order of " + orderSize + " " + to + " @ " + orderPrice + " " +  marketObj.getMarket());
+		inTransaction = true;
+		sellBack = true;
+	}
+
+	public void onFillOrder(double size) {
+		System.out.println("Order filled!");
+
+		// This means the order was only partially filled
+		// Deduct the size from the order size and wait for order to fill
+		if (size < orderSize) {
+			orderSize -= size;
+			return;
+		}
+
 		if (opportunity.size() > 0) {
-			// Set a limit buy order for transaction
-			Market marketObj = getMarket(opportunity.get(0)[0], opportunity.get(0)[1]);
-			orderPrice = marketObj.subtractPrice(marketObj.getIncrement());
-			orderSize = balance * marketObj.getPrice(opportunity.get(0)[0], opportunity.get(0)[1]);
-			currentMarket = marketObj.getMarket();
-			System.out.println("Placed an order of " + orderSize + " " + opportunity.get(0)[1] + " @ " + orderPrice + " " +  marketObj.getMarket());
-			inTransaction = true;
+			// Order was completely filled! Move on to the next.
+			opportunity.remove(0);
+			placeNextOrder();
+		} else {
+			// We should have completed our opportunity.
+			inTransaction = false;
+			usdBalance = account.getAvailableBalance(Currency.USD);
+			System.out.println("Completed opportunity! Balance: $" + usdBalance);
 		}
 	}
 
+	public void placeNextOrder() {
+		if (opportunity.size() > 0) {
+			double fromBalance = account.getAvailableBalance(currencyMap.get(opportunity.get(0)[0]));
+			balance = fromBalance;
+			// Update our internal USD balance to be as accurate as possible
+			if (opportunity.get(0)[0].equals("USD")) {
+				usdBalance = fromBalance;
+			}
+
+			System.out.println("Current balance: " + balance + " " + opportunity.get(0)[0]);
+
+			OrderType orderType = getOrderType(opportunity.get(0)[0], opportunity.get(0)[1]);
+			Market market = getMarket(opportunity.get(0)[0], opportunity.get(0)[1]);
+			String product = market.getMarket();
+
+			double size = balance * market.getPrice(opportunity.get(0)[0], opportunity.get(0)[1]);
+			size = round(size, 8);
+
+			double price = market.subtractPrice(market.getIncrement());
+			System.out.println("Placing " + orderType.toString() + " for " + size + " " + opportunity.get(0)[1] + " @ " + price + " " + market.getMarket());
+
+			orderIncrement++;
+			clientOrderID = "arbitrader_" + orderIncrement;
+			inTransaction = true;
+			orderID = account.placeOrder(orderType, product, size, price, clientOrderID);
+			System.out.println("Successfully placed an order! Order ID: " + orderID);
+			currentMarket = market.getMarket();
+			orderPrice = price;
+			orderSize = size;
+		}
+	}
+
+	public void placeNextOrder(String from, String to) {
+		double fromBalance = account.getAvailableBalance(currencyMap.get(from));
+		balance = fromBalance;
+		// Update our internal USD balance to be as accurate as possible
+		if (from.equals("USD")) {
+			usdBalance = fromBalance;
+		}
+
+		System.out.println("Current balance: " + balance + " " + from);
+
+		OrderType orderType = getOrderType(from, to);
+		Market market = getMarket(from, to);
+		String product = market.getMarket();
+
+		double size = balance * market.getPrice(from, to);
+		size = round(size, 8);
+
+		double price = market.subtractPrice(market.getIncrement());
+		System.out.println("Placing " + orderType.toString() + " for " + size + " " + to + " @ " + price + " " + market.getMarket());
+
+		orderIncrement++;
+		clientOrderID = "arbitrader_" + orderIncrement;
+		inTransaction = true;
+		orderID = account.placeOrder(orderType, product, size, price, clientOrderID);
+		System.out.println("Successfully placed an order! Order ID: " + orderID);
+		currentMarket = market.getMarket();
+		orderPrice = price;
+		orderSize = size;
+	}
+
+	public OrderType getOrderType(String currencyFrom, String currencyTo) {
+		if (currencyFrom.equals("USD")) {
+			return OrderType.BID;
+		} else if (currencyTo.equals("USD")) {
+			return OrderType.ASK;
+		} else if (currencyFrom.equals("BTC") && (currencyTo.equals("ETH") || currencyTo.equals("LTC"))) {
+			return OrderType.BID;
+		}
+		return null;
+	}
+
+	private double round(double value, int decimal) {
+		return (double) Math.round(value * decimal) / decimal;
+	}
+
+	@Deprecated
 	public void fillOrder() {
 		System.out.println("Order filled!");
 		balance = orderSize;
@@ -96,21 +276,26 @@ public class App {
 		orderSize = 0;
 		orderPrice = 0;
 		currentMarket = "";
-		opportunity.remove(0);
+		if (sellBack) {
+			opportunity.clear();
+		} else {
+			opportunity.remove(0);
+		}
 	}
 
 	public void cancelOrder() {
-		if (opportunity.size() == 3) {
-			currentMarket = "";
-			inTransaction = false;
-			orderPrice = 0;
-			orderID = "";
-			orderSize = 0;
-			System.out.println("Cancelled order.");
-		} else {
-			System.out.println("Can't cancel order. We're already committed into this opportunity.");
+//		if (opportunity.size() == 3) {
+		account.cancelOrder(orderID);
+		currentMarket = "";
+		inTransaction = false;
+		orderPrice = 0;
+		orderID = "";
+		orderSize = 0;
+		System.out.println("Cancelled order.");
+//		} else {
+			//System.out.println("Can't cancel order. We're already committed into this opportunity.");
 			// TODO come up with an exit strategy
-		}
+//		}
 
 	}
 

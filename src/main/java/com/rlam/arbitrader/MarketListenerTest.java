@@ -1,9 +1,5 @@
 package com.rlam.arbitrader;
 
-import java.io.*;
-import java.sql.Timestamp;
-import java.util.*;
-
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -12,13 +8,18 @@ import com.rlam.arbitrader.util.BellmanFordSP;
 import com.rlam.arbitrader.util.DirectedEdge;
 import com.rlam.arbitrader.util.EdgeWeightedDigraph;
 
+import java.io.IOException;
+import java.sql.Timestamp;
+import java.util.ArrayList;
+import java.util.HashMap;
+
 // TODO make singleton
-public class MarketListener implements Runnable {
+public class MarketListenerTest implements Runnable {
 
 	public static String[] currencies = {"USD", "BTC", "ETH", "LTC"};
 
 	public HashMap<String, Market> markets;
-	
+
 //	public BigDecimal[][] marketRates = {{BigDecimal.ONE, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO},
 //								         {BigDecimal.ZERO, BigDecimal.ONE, BigDecimal.ZERO, BigDecimal.ZERO},
 //								         {BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ONE, BigDecimal.ZERO},
@@ -28,8 +29,8 @@ public class MarketListener implements Runnable {
 									 {0, 0, 1, 0},
 									 {0, 0, 0, 1}};
 	private Thread thread;
-	private App app;
-	
+	private AppTest app;
+
 	/**
      * The GDAX server
      */
@@ -42,7 +43,7 @@ public class MarketListener implements Runnable {
     private static double initialStake = 1000;
     private static double total = 0;
 
-    public MarketListener(App app) {
+    public MarketListenerTest(AppTest app) {
     	this.app = app;
     	markets = new HashMap<>();
     	for (Market m : Market.values()) {
@@ -53,7 +54,7 @@ public class MarketListener implements Runnable {
     private void initializeMarketRates() {
         // Fetch only the markets with the lowest volume to initially populate the market rates matrix.
         // Limit to 3 due to the REST API's request per second limitation.
-	    String[] marketsToFetch = {"ETH-BTC"};
+	    String[] marketsToFetch = {"ETH-BTC", "LTC-USD"};
 
 	    for (String marketID : marketsToFetch) {
 		    Market market = markets.get(marketID);
@@ -76,36 +77,23 @@ public class MarketListener implements Runnable {
                     JsonObject jsonObject = (JsonObject) new JsonParser().parse(message);
                     String marketID = jsonObject.get("product_id").getAsString();
                     double price = jsonObject.get("price").getAsDouble();
-                    double size = jsonObject.get("size").getAsDouble();
-	                String makerOrderID = jsonObject.get("maker_order_id").getAsString();
-//	                System.out.println(marketID + " " + price);
-	                System.out.println(jsonObject.toString());
+	                System.out.println(marketID + " " + price);
 
 	                Market market = markets.get(marketID);
 	                market.updatePrice(price);
 	                updateMarketRates(market);
 
-	                // Notify main thread of price change
-	                app.onPriceChange(market);
-
-	                // Our order has been filled!
-	                if (makerOrderID.equals(app.orderID)) {
-		                app.onFillOrder(size);
-	                }
-
-	                if (!app.inTransaction) {
-		                ArrayList<String[]> opportunity = arbitrage();
-
-		                if (opportunity.size() > 2) {
-			                app.onArbitrageOpportunity(opportunity);
-		                }
-	                }
+                    ArrayList<String[]> opportunity = arbitrage();
+                    if (opportunity.size() > 2) {
+                    	app.onArbitrageOpportunity(opportunity);
+                    }
+                    app.onPriceChange(market);
                 }
             })
-	        .addHeader("CB-ACCESS-KEY", Constants.API_KEY)
-	        .addHeader("CB-ACCESS-SIGN", GDAXUtil.signMessage(Constants.SECRET, "/users/self/verify", "GET", "", timestamp.toString()))
-		    .addHeader("CB-ACCESS-TIMESTAMP", timestamp.toString())
-		    .addHeader("CB-ACCESS-PASSPHRASE", Constants.PASSPHRASE)
+//	        .addHeader("CB-ACCESS-KEY", Constants.API_KEY)
+//	        .addHeader("CB-ACCESS-SIGN", GDAXUtil.signMessage(Constants.SECRET, "/users/self/verify", "GET", "", timestamp.toString()))
+//		    .addHeader("CB-ACCESS-TIMESTAMP", timestamp.toString())
+//		    .addHeader("CB-ACCESS-PASSPHRASE", Constants.PASSPHRASE)
             .addExtension(WebSocketExtension.PERMESSAGE_DEFLATE)
             .connect();
     }
@@ -147,7 +135,7 @@ public class MarketListener implements Runnable {
 	    if (spt.hasNegativeCycle()) {
 		    double stake = app.usdBalance + total;
 		    double beginningStake = stake;
-//		    System.out.println("=========================================");
+		    System.out.println("=========================================");
 		    for (DirectedEdge e : spt.negativeCycle()) {
 		        String[] transaction = { currencies[e.from()],  currencies[e.to()] };
 			    Market marketObj = getMarket(currencies[e.from()], currencies[e.to()]);
@@ -157,7 +145,7 @@ public class MarketListener implements Runnable {
 //			    count++;
 			    transactions.add(transaction);
 		    }
-//		    System.out.println("=========================================");
+		    System.out.println("=========================================");
 //		    System.out.println("Profit: " + (stake - beginningStake));
 //		    total += (stake - beginningStake);
 //		    System.out.println("Total: " + total);
