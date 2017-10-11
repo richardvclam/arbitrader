@@ -29,12 +29,13 @@ public class MarketListener implements Runnable {
 									 {0, 0, 0, 1}};
 	private Thread thread;
 	private App app;
+	private WebSocket ws;
 	
 	/**
      * The GDAX server
      */
     private static final String SERVER = "wss://ws-feed.gdax.com";
-
+//	private static final String SERVER = "ws://localhost:8080";
     /**
      * The timeout value in milliseconds for socket connection.
      */
@@ -71,7 +72,23 @@ public class MarketListener implements Runnable {
             .setConnectionTimeout(TIMEOUT)
             .createSocket(SERVER)
             .addListener(new WebSocketAdapter() {
-                // A text message arrived from the server.
+	            /**
+	             * Called after successfully establishing a connection with the server.
+	             * @param websocket the websocket
+	             * @param headers the HTTP headers received from the server
+	             */
+            	@Override
+            	public void onConnected(WebSocket websocket, Map<String, List<String>> headers) {
+            		System.out.println("Connected to GDAX server!");
+	            }
+
+	            /**
+	             * Called when a JSON message is received. Parses the incoming data into a JSON object for
+	             * consumption.
+	             * @param websocket
+	             * @param message
+	             */
+	            @Override
                 public void onTextMessage(WebSocket websocket, String message) {
                     JsonObject jsonObject = (JsonObject) new JsonParser().parse(message);
                     String marketID = jsonObject.get("product_id").getAsString();
@@ -100,6 +117,18 @@ public class MarketListener implements Runnable {
 			                app.onArbitrageOpportunity(opportunity);
 		                }
 	                }
+                }
+
+                @Override
+	            public void onDisconnected(WebSocket websocket, WebSocketFrame serverCloseFrame,
+                                           WebSocketFrame clientCloseFrame, boolean closedByServer) {
+	            	System.out.println("Connection with server has been closed.");
+	            	try {
+			            ws.recreate().connect();
+		            } catch (IOException | WebSocketException e) {
+//	            		e.printStackTrace();
+		            }
+
                 }
             })
 	        .addHeader("CB-ACCESS-KEY", Constants.API_KEY)
@@ -186,7 +215,8 @@ public class MarketListener implements Runnable {
 		String subscribe = gson.toJson(new Subscribe());
 		try {
 			// Connect to the GDAX server.
-			WebSocket ws = connect();
+			ws = connect();
+			ws.connect();
 			// Send initial subscribe message to receive feed messages
 			ws.sendText(subscribe);
 		} catch (Exception e) {

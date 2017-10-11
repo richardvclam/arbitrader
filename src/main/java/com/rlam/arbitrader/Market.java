@@ -92,16 +92,17 @@ public enum Market {
 	}
 	
 	public void fetchPriceFromServer() {
-		HttpResponse<JsonNode> response = null;
-		
 		try {
-			response = Unirest.get(url + market + "/ticker").asJson();
+			HttpResponse<JsonNode> response = Unirest.get(url + market + "/ticker").asJson();
+			JsonObject jsonObject = (JsonObject) new JsonParser().parse(response.getBody().toString());
+			this.price = jsonObject.get("price").getAsDouble();
 		} catch (UnirestException e) {
 			e.printStackTrace();
+		} catch (NullPointerException e) {
+			System.err.println("Unable to fetch " + market + " price from server. Server could possibly be down.");
+			e.printStackTrace();
 		}
-		
-        JsonObject jsonObject = (JsonObject) new JsonParser().parse(response.getBody().toString());
-        this.price = jsonObject.get("price").getAsDouble();
+
 	}
 	
 }
